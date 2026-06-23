@@ -27,7 +27,29 @@ bun add file:/path/to/zario-express
 
 ## Usage
 
-Register `expressLogger` as a middleware in your Express application.
+### Basic Usage (Zero Configuration)
+
+You can register the middleware directly without importing the core `zario` library. It will automatically use the default global Zario logger.
+
+```typescript
+import express from 'express';
+import { expressLogger } from 'zario-express';
+
+const app = express();
+
+// Register the logging middleware
+app.use(expressLogger());
+
+app.get('/', (req, res) => {
+  res.send('Hello World');
+});
+
+app.listen(3000);
+```
+
+### Custom Logger Usage
+
+If you need to configure custom settings (such as JSON formatting or log levels), initialize a Zario `Logger` instance and pass it to the middleware.
 
 ```typescript
 import express from 'express';
@@ -36,16 +58,16 @@ import { expressLogger } from 'zario-express';
 
 const app = express();
 
-// Initialize the Zario Logger
-const logger = new Logger({
+// Initialize custom Zario Logger
+const customLogger = new Logger({
   level: 'info',
   json: true,
   timestamp: true
 });
 
-// Register the logging middleware
+// Pass the custom logger to the middleware
 app.use(expressLogger({
-  logger,
+  logger: customLogger,
   level: 'info',
   excludePaths: ['/health', '/metrics']
 }));
@@ -54,9 +76,7 @@ app.get('/', (req, res) => {
   res.send('Hello World');
 });
 
-app.listen(3000, () => {
-  logger.info('Server started on port 3000');
-});
+app.listen(3000);
 ```
 
 ## Configuration Options
