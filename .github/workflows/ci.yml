@@ -1,0 +1,34 @@
+name: CI
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: zario-adapters/zario-express
+      - uses: actions/checkout@v4
+        with:
+          repository: dev-dami/zario
+          ref: 253bf3ece22f9ea24dd30bd403162097c4125a48
+          path: zario
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - name: Build core
+        working-directory: zario
+        run: bun install --frozen-lockfile && bun run build
+      - name: Verify adapter
+        working-directory: zario-adapters/zario-express
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun run lint
+          bun test
+          bun run build

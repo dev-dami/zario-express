@@ -1,111 +1,77 @@
 # zario-express
 
-Express request logging middleware for the Zario logger library.
-
-## Installation
-
-Install `zario-express` along with its peer dependencies `zario` and `express` in your application:
+Request-scoped Zario logging for Express 4/5, tested on Bun.
 
 ```bash
-# Using npm
-npm install zario-express zario express
-
-# Using bun
 bun add zario-express zario express
-
-# Using pnpm
-pnpm add zario-express zario express
 ```
 
-### Local Development / Linking
+```ts
+import express from 'express';
+import { expressLogger } from 'zario-express';
+import { zario } from 'zario';
 
-To link a local clone of `zario-express` to your application during development, reference its absolute path:
+const log = zario({ json: true });
+const app = express();
+app.use(expressLogger({ logger: log, excludePaths: ['/health'] }));
+app.get('/', (req, res) => {
+  req.log.info('handled');
+  res.json({ requestId: req.requestId });
+});
+app.listen(3000);
+// Stop accepting requests and drain the server before await log.close().
+```
+
+Register middleware before handlers that use `req.log` or `req.requestId`.
+An omitted logger creates a console-only Zario factory instance. Supply a logger
+when you need explicit flush/close ownership.
+
+| Option | Default / behavior |
+|---|---|
+| `logger` | A new `zario()` instance |
+| `level` | `info` for success, `warn` for 4xx, `error` for 5xx/aborted responses |
+| `excludePaths` | Exact pathnames excluded from automatic completion logging |
+| `requestId(req)` | Defaults to `crypto.randomUUID()`; headers are not trusted automatically |
+
+Completion logs include `requestId`, `method`, `path`, `status`,
+`responseTimeMs`, and `aborted`. Completion and connection-close events produce
+at most one record. Excluded paths still receive a request logger. Custom log
+levels use Zario's `logWithLevel()`.
+
+## Changes from 1.0
+
+The default no longer uses the process-wide `Logger.global`. Request logs now
+use a pathname rather than the raw URL with query parameters, and do not emit
+IP addresses or user-agent headers automatically. Update downstream schema
+consumers from `url` to `path`; add any explicitly required fields through
+`req.log`. Applications may supply a fixed `level` to retain uniform severity.
+
+## Development
+
+Bun is the package manager and test runner. Keep the core checkout at `../../zario`:
+
+```text
+workspace/
+  zario/
+  zario-adapters/
+    zario-express/
+```
+
+Build the core first with `bun install --frozen-lockfile && bun run build` in
+`workspace/zario`. Then in this adapter:
 
 ```bash
-bun add file:/path/to/zario-express
+bun install --frozen-lockfile
+bun run typecheck
+bun run lint
+bun test
+bun run build
 ```
 
-## Usage
-
-### Basic Usage (Zero Configuration)
-
-You can register the middleware directly without importing the core `zario` library. It will automatically use the default global Zario logger.
-
-```typescript
-import express from 'express';
-import { expressLogger } from 'zario-express';
-
-const app = express();
-
-// Register the logging middleware
-app.use(expressLogger());
-
-app.get('/', (req, res) => {
-  res.send('Hello World');
-});
-
-app.listen(3000);
-```
-
-### Custom Logger Usage
-
-If you need to configure custom settings (such as JSON formatting or log levels), initialize a Zario `Logger` instance and pass it to the middleware.
-
-```typescript
-import express from 'express';
-import { Logger } from 'zario';
-import { expressLogger } from 'zario-express';
-
-const app = express();
-
-// Initialize custom Zario Logger
-const customLogger = new Logger({
-  level: 'info',
-  json: true,
-  timestamp: true
-});
-
-// Pass the custom logger to the middleware
-app.use(expressLogger({
-  logger: customLogger,
-  level: 'info',
-  excludePaths: ['/health', '/metrics']
-}));
-
-app.get('/', (req, res) => {
-  res.send('Hello World');
-});
-
-app.listen(3000);
-```
-
-## Configuration Options
-
-The `expressLogger` function accepts an optional configuration object:
-
-| Option | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `logger` | `Logger` | `Logger.global` | The Zario Logger instance to pipe logs to. |
-| `level` | `string` | `'info'` | The log level used for request completion logs. |
-| `excludePaths` | `string[]` | `[]` | List of routes/paths to skip logging entirely (e.g. health checks). |
-
-## Log Output Format
-
-When a request completes, a structured log entry is recorded with the following metadata:
-
-```json
-{
-  "level": "info",
-  "message": "GET /api/users 200 - 4.2ms",
-  "timestamp": "2026-06-23T09:00:00.000Z",
-  "method": "GET",
-  "url": "/api/users",
-  "status": 200,
-  "responseTimeMs": 4.2,
-  "ip": "127.0.0.1",
-  "userAgent": "Mozilla/5.0..."
-}
-```
+CI checks out and builds the pinned core revision before testing the adapter.
+The relative development dependency stays out of the published runtime contract;
+applications install the `zario` peer dependency normally. These changes require
+Zario 0.9.0; publish the core before releasing this adapter.
 
 ## License
 

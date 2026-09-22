@@ -1,46 +1,68 @@
-import { Request, Response, NextFunction } from 'express';
-import { Logger } from 'zario';
+import type { Request, RequestHandler } from "express";
+import { type Logger, type LogLevel, zario } from "zario";
+
+declare global {
+  namespace Express {
+    interface Request {
+      /** Request-scoped logger, available after expressLogger middleware. */
+      log: Logger;
+      requestId: string;
+    }
+  }
+}
 
 export interface ExpressLoggerOptions {
   logger?: Logger;
-  level?: 'info' | 'debug' | 'warn' | 'error' | string;
+  level?: LogLevel;
   excludePaths?: string[];
+  /** Override ID generation; incoming headers are not trusted automatically. */
+  requestId?: (request: Request) => string;
 }
 
-export function expressLogger(options: ExpressLoggerOptions = {}) {
-  const logger = options.logger || Logger.global;
-  const level = options.level || 'info';
-  const excludePaths = options.excludePaths || [];
-
-  return (req: Request, res: Response, next: NextFunction) => {
-    if (excludePaths.includes(req.path)) {
-      return next();
+/** Attach req.log and record completion/aborted responses with request context. */
+export function expressLogger(
+  options: ExpressLoggerOptions = {},
+): RequestHandler {
+  const logger = options.logger ?? zario();
+  const excluded = new Set(options.excludePaths);
+  return (req, res, next): void => {
+    const start = performance.now();
+    req.requestId = options.requestId?.(req) ?? crypto.randomUUID();
+    req.log = logger.child({ requestId: req.requestId });
+    if (excluded.has(req.path)) {
+      next();
+      return;
     }
-
-    const start = process.hrtime.bigint();
-
-    res.on('finish', () => {
-      const end = process.hrtime.bigint();
-      const durationMs = Number(end - start) / 1_000_000;
-      
-      const logData = {
-        method: req.method,
-        url: req.originalUrl || req.url,
-        status: res.statusCode,
-        responseTimeMs: parseFloat(durationMs.toFixed(2)),
-        ip: req.ip || req.socket.remoteAddress,
-        userAgent: req.get('user-agent'),
-      };
-
-      const message = `${req.method} ${req.originalUrl || req.url} ${res.statusCode} - ${durationMs.toFixed(1)}ms`;
-      
-      if (typeof (logger as any)[level] === 'function') {
-        (logger as any)[level](message, logData);
-      } else {
-        logger.info(message, logData);
-      }
-    });
-
+    let recorded = false;
+    const completed = (aborted: boolean): void => {
+      if (recorded) return;
+      recorded = true;
+      res.off("finish", onFinish);
+      res.off("close", onClose);
+      const responseTimeMs = performance.now() - start;
+      const level =
+        options.level ??
+        (aborted || res.statusCode >= 500
+          ? "error"
+          : res.statusCode >= 400
+            ? "warn"
+            : "info");
+      req.log.logWithLevel(
+        level,
+        `${req.method} ${req.path} ${res.statusCode}`,
+        {
+          method: req.method,
+          path: req.path,
+          status: res.statusCode,
+          responseTimeMs,
+          aborted,
+        },
+      );
+    };
+    const onFinish = (): void => completed(false);
+    const onClose = (): void => completed(!res.writableFinished);
+    res.once("finish", onFinish);
+    res.once("close", onClose);
     next();
   };
 }
